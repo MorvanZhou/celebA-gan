@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import tensorflow as tf
-import cv2
 
 # data is downloaded from http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html
 
@@ -107,10 +106,8 @@ class CelebA:
                             except Exception as e:
                                 break
                         else:
-                            img = cv2.imread(os.path.join(self.img_dir, img_name))
-                            if img is None:
-                                break
-                            img = img[self.crop[0]:self.crop[1], self.crop[2]:self.crop[3]]
+                            raise OSError
+
                         label_str = img_labels.replace("  ", " ").split(" ")
                         labels = [0 if label_str[i] == "-1" else 1 for i in self.label_names_id]
                         assert len(labels) == len(self.label_names), ValueError(labels, img_labels)
@@ -159,7 +156,7 @@ if __name__ == "__main__":
     IMAGE_DIR = args.image_dir
 
     t0 = time.time()
-    # parse_celebA_tfreord()
+    parse_celebA_tfreord()
     # ds = load_celebA_tfrecord(20)
     # t1 = time.time()
     # print("load time", t1-t0)

@@ -5,13 +5,15 @@ from cnn import dc_d, dc_g, resnet_g, resnet_d
 
 
 class ACGANgp(keras.Model):
-    def __init__(self, latent_dim, label_dim, img_shape, lambda_=10, summary_writer=None, lr=0.0001, beta1=0., beta2=0.9, net="dcnet"):
+    def __init__(self, latent_dim, label_dim, img_shape, lambda_=10, summary_writer=None,
+                 lr=0.0001, beta1=0., beta2=0.9, net="dcnet", norm="batch"):
         super().__init__()
         self.latent_dim = latent_dim
         self.label_dim = label_dim
         self.img_shape = img_shape
         self.lambda_ = lambda_
         self.net_name = net
+        self.norm = norm
         self.g = self._get_generator()
         self.d = self._get_discriminator()
 
@@ -36,7 +38,7 @@ class ACGANgp(keras.Model):
         net = dc_d if self.net_name == "dcnet" else resnet_d
         img = keras.Input(shape=self.img_shape)
         s = keras.Sequential([
-            net(use_bn=False),
+            net(norm=self.norm),
             keras.layers.Dense(1 + self.label_dim, kernel_initializer=keras.initializers.RandomNormal(stddev=0.02)),
         ], name="s")
         o = s(img)
@@ -47,10 +49,11 @@ class ACGANgp(keras.Model):
 
     def _get_generator(self):
         noise = keras.Input(shape=(self.latent_dim,))
-        label = keras.Input(shape=(self.label_dim,), dtype=tf.int32)
-        model_in = tf.concat((noise, tf.cast(label, tf.float32)), axis=1)
+        label = keras.Input(shape=(self.label_dim,), dtype=tf.float32)
+        label_emb = keras.layers.Dense(128)(label)
+        model_in = tf.concat((noise, label_emb), axis=1)
         net = dc_g if self.net_name == "dcnet" else resnet_g
-        s = net((self.latent_dim + self.label_dim,))
+        s = net((self.latent_dim+128,), norm=self.norm)
         o = s(model_in)
         model = keras.Model([noise, label], o, name="generator")
         model.summary()

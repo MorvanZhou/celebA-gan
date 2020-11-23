@@ -9,11 +9,13 @@ class ACGAN(keras.Model):
     discriminator 图片 预测 真假+标签
     generator 标签 生成 图片
     """
-    def __init__(self, latent_dim, label_dim, img_shape, a=-1, b=1, c=1, summary_writer=None, lr=0.0002, beta1=0.5, beta2=0.999, net="dcnet"):
+    def __init__(self, latent_dim, label_dim, img_shape, a=-1, b=1, c=1, summary_writer=None,
+                 lr=0.0002, beta1=0.5, beta2=0.999, net="dcnet", norm="batch"):
         super().__init__()
         self.latent_dim = latent_dim
         self.label_dim = label_dim
         self.img_shape = img_shape
+        self.norm = norm
         self.a, self.b, self.c = a, b, c
         self.net_name = net
 
@@ -37,7 +39,7 @@ class ACGAN(keras.Model):
         net = dc_d #if self.net_name == "dcnet" else resnet_d
         img = keras.Input(shape=self.img_shape)
         s = keras.Sequential([
-            net(use_bn=True),
+            net(norm=self.norm),
             keras.layers.Dense(1+self.label_dim, kernel_initializer=keras.initializers.RandomNormal(stddev=0.02)),
         ], name="s")
         o = s(img)

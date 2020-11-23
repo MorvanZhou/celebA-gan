@@ -19,15 +19,27 @@ def set_soft_gpu(soft_gpu):
 
 def save_gan(model, ep):
     model_name = model.__class__.__name__.lower()
-    r = np.random.choice([0, 1], (10, model.label_dim), replace=True)
-    noise = tf.repeat(tf.random.normal([1, model.latent_dim]), repeats=10, axis=0)
-    imgs = np.concatenate(
-        [model.predict((r, noise)) for _ in range(5)],
-        axis=0)
+    # "Attractive", "Smiling", "Male",
+    r = np.array([
+        [0, 0, 0],
+        [0, 0, 1],
+        [0, 1, 0],
+        [0, 1, 1],
+        [1, 0, 0],
+        [1, 0, 1],
+        [1, 1, 0],
+        [1, 1, 1]
+    ])
+    imgs = []
+    for _ in range(5):
+        noise = tf.random.normal([1, model.latent_dim])
+        imgs.append(model.predict(
+            (r, tf.concat([noise for _ in range(len(r))], axis=0))))
+    imgs = np.concatenate(imgs, axis=0)
 
     imgs = (imgs + 1) / 2
     plt.clf()
-    nc, nr = 10, 5
+    nc, nr = len(r), 5
     plt.figure(0, (nc * 2, nr * 2))
     for c in range(nc):
         for r in range(nr):

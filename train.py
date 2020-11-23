@@ -11,9 +11,9 @@ import datetime
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-m", "--model", dest="model", default="acgan")
-parser.add_argument("-z", "--latent_dim", dest="latent_dim", default=200, type=int)
-parser.add_argument("-l", "--label_dim", dest="label_dim", default=40, type=int)
-parser.add_argument("-b", "--batch_size", dest="batch_size", default=25, type=int)
+parser.add_argument("-z", "--latent_dim", dest="latent_dim", default=256, type=int)
+parser.add_argument("-l", "--label_dim", dest="label_dim", default=3, type=int)
+parser.add_argument("-b", "--batch_size", dest="batch_size", default=10, type=int)
 parser.add_argument("-e", "--epoch", dest="epoch", default=101, type=int)
 parser.add_argument("--soft_gpu", dest="soft_gpu", action="store_true", default=True)
 parser.add_argument("--lambda", dest="lambda_", default=10, type=float)
@@ -22,6 +22,7 @@ parser.add_argument("-lr", "--learning_rate", dest="lr", default=0.0002, type=fl
 parser.add_argument("-b1", "--beta1", dest="beta1", default=0., type=float)
 parser.add_argument("-b2", "--beta2", dest="beta2", default=0.9, type=float)
 parser.add_argument("--net", dest="net", default="dcnet", type=str, help="dcnet or resnet")
+parser.add_argument("--norm", dest="norm", default="batch", help="batch or instance")
 parser.add_argument("--label_path", dest="label_path", default="data/list_attr_celeba.txt", type=str)
 parser.add_argument("--image_dir", dest="image_dir", default="data/img_align_celeba", type=str)
 
@@ -100,13 +101,15 @@ if __name__ == "__main__":
     if model_name == "acgan":
         d = dataset.load_celebA_tfrecord(args.batch_size // 2)
         m = ACGAN(latent_dim=args.latent_dim, label_dim=args.label_dim, img_shape=(128, 128, 3), a=-1, b=1, c=1,
-                  summary_writer=summary_writer, lr=args.lr, beta1=args.beta1, beta2=args.beta2, net=args.net)
+                  summary_writer=summary_writer, lr=args.lr, beta1=args.beta1, beta2=args.beta2,
+                  net=args.net, norm=args.norm)
         logger = init_logger(model_name, date_str, m)
         train(m, d)
     elif model_name == "acgangp":
         d = dataset.load_celebA_tfrecord(args.batch_size)
         m = ACGANgp(args.latent_dim, args.label_dim, (128, 128, 3), args.lambda_,
-                    summary_writer=summary_writer, lr=args.lr, beta1=args.beta1, beta2=args.beta2, net=args.net)
+                    summary_writer=summary_writer, lr=args.lr, beta1=args.beta1, beta2=args.beta2,
+                    net=args.net, norm=args.norm)
         logger = init_logger(model_name, date_str, m)
         traingp(m, d)
     else:
