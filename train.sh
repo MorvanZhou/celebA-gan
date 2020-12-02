@@ -1,1 +1,0 @@
-python train.py --model acgangp --latent_dim 256 --label_dim 3 --batch_size 10 --epoch 101 --soft_gpu --lambda 10 --d_loop 1 -lr 0.0002 --beta1 0. --beta2 0.9 --net resnet --norm batch

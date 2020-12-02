@@ -18,20 +18,16 @@ def set_soft_gpu(soft_gpu):
 
 
 def save_gan(model, ep):
-    model_name = model.__class__.__name__.lower()
-    # "Attractive", "Smiling", "Male",
+    # "Smiling", "Male",
     r = np.array([
-        [0, 0, 0],
-        [0, 0, 1],
-        [0, 1, 0],
-        [0, 1, 1],
-        [1, 0, 0],
-        [1, 0, 1],
-        [1, 1, 0],
-        [1, 1, 1]
+        [0, 0],
+        [0, 1],
+        [1, 0],
+        [1, 1],
     ])
     imgs = []
-    for _ in range(5):
+    n = 5
+    for _ in range(n):
         noise = tf.random.normal([1, model.latent_dim])
         imgs.append(model.predict(
             (r, tf.concat([noise for _ in range(len(r))], axis=0))))
@@ -39,7 +35,7 @@ def save_gan(model, ep):
 
     imgs = (imgs + 1) / 2
     plt.clf()
-    nc, nr = len(r), 5
+    nc, nr = len(r), n
     plt.figure(0, (nc * 2, nr * 2))
     for c in range(nc):
         for r in range(nr):
@@ -49,16 +45,16 @@ def save_gan(model, ep):
             plt.axis("off")
 
     plt.tight_layout()
-    path = "visual/{}/{}.png".format(model_name, ep)
+    path = "visual/{}.png".format(ep)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     plt.savefig(path)
 
 
-def get_logger(model_name, date_str):
+def get_logger(date_str):
     log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    log_path = "visual/{}/{}/train.log".format(model_name, date_str)
+    log_path = "visual/{}/train.log".format(date_str)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     fh = logging.FileHandler(log_path)
     fh.setFormatter(log_fmt)

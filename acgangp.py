@@ -17,9 +17,8 @@ class ACGANgp(keras.Model):
         self.g = self._get_generator()
         self.d = self._get_discriminator()
 
-        # beta_1 = 0.5 gives bad results
         self.opt = keras.optimizers.Adam(lr, beta_1=beta1, beta_2=beta2)
-        self.loss_class = keras.losses.BinaryCrossentropy(from_logits=True)
+        self.loss_class = lambda q, p: -tf.reduce_mean(q * 0.9 * tf.math.log(p * 0.9 + 0.05) + 0.9*(1-q) * tf.math.log(1-(p * 0.9 + 0.05)))
 
         self.summary_writer = summary_writer
         self._train_step = 0
@@ -39,10 +38,11 @@ class ACGANgp(keras.Model):
         img = keras.Input(shape=self.img_shape)
         s = keras.Sequential([
             net(norm=self.norm),
-            keras.layers.Dense(1 + self.label_dim, kernel_initializer=keras.initializers.RandomNormal(stddev=0.02)),
         ], name="s")
         o = s(img)
-        o_ls, o_class = o[:, :1], o[:, 1:]
+        o_ls = keras.layers.Conv2D(1, 3, 2, "valid")(o)
+        o_class = keras.layers.Flatten()(o_ls)
+        o_class = tf.nn.sigmoid(keras.layers.Dense(self.label_dim)(o_class))
         model = keras.Model(img, [o_ls, o_class], name="discriminator")
         model.summary()
         return model
@@ -50,10 +50,11 @@ class ACGANgp(keras.Model):
     def _get_generator(self):
         noise = keras.Input(shape=(self.latent_dim,))
         label = keras.Input(shape=(self.label_dim,), dtype=tf.float32)
-        label_emb = keras.layers.Dense(128)(label)
+        label_emb_dim = self.latent_dim // 7
+        label_emb = keras.layers.Dense(label_emb_dim)(label)
         model_in = tf.concat((noise, label_emb), axis=1)
         net = dc_g if self.net_name == "dcnet" else resnet_g
-        s = net((self.latent_dim+128,), norm=self.norm)
+        s = net((self.latent_dim+label_emb_dim,), norm=self.norm)
         o = s(model_in)
         model = keras.Model([noise, label], o, name="generator")
         model.summary()
@@ -71,25 +72,30 @@ class ACGANgp(keras.Model):
         gp = tf.square(g_norm2 - 1.)
         return tf.reduce_mean(gp)
 
+    @staticmethod
+    def w_distance(real, fake):
+        # the distance of two data distributions
+        return tf.reduce_mean(real) - tf.reduce_mean(fake)
+
     def train_d(self, img, img_label):
+        img_label = tf.cast(img_label, tf.float32)
         with tf.GradientTape() as tape:
             g_img = self.call(img_label, training=False)
             gp = self.gp(img, g_img)
-            all_img = tf.concat((img, g_img), axis=0)
-            pred, pred_class = self.d.call(all_img, training=True)
-            loss_class = self.loss_class(tf.concat((img_label, img_label), axis=0), pred_class)
-            pred_real, pred_fake = tf.split(pred, num_or_size_splits=2, axis=0)
-            w_distance = tf.reduce_mean(pred_real) - tf.reduce_mean(pred_fake)  # maximize W distance
+            pred_fake, fake_class = self.d.call(g_img, training=True)
+            pred_real, real_class = self.d.call(img, training=True)
+            loss_class = (self.loss_class(img_label, fake_class) + self.loss_class(img_label, real_class))/2
+            w_distance = -self.w_distance(pred_real, pred_fake)  # maximize W distance
             gp_loss = self.lambda_ * gp
-            loss = gp_loss + loss_class - w_distance
+            loss = gp_loss + loss_class + w_distance
         grads = tape.gradient(loss, self.d.trainable_variables)
         self.opt.apply_gradients(zip(grads, self.d.trainable_variables))
 
-        if self._train_step % 300 == 0 and self.summary_writer is not None:
+        if self._train_step % 100 == 0 and self.summary_writer is not None:
             with self.summary_writer.as_default():
                 tf.summary.scalar("d/w_distance", w_distance, step=self._train_step)
                 tf.summary.scalar("d/gp", gp_loss, step=self._train_step)
-                tf.summary.scalar("d/sigmoid", loss_class, step=self._train_step)
+                tf.summary.scalar("d/class", loss_class, step=self._train_step)
                 tf.summary.histogram("d/pred_real", pred_real, step=self._train_step)
                 tf.summary.histogram("d/pred_fake", pred_fake, step=self._train_step)
                 tf.summary.histogram("d/last_grad", grads[-1], step=self._train_step)
@@ -98,7 +104,7 @@ class ACGANgp(keras.Model):
 
     def train_g(self, batch_size):
         random_img_label = tf.convert_to_tensor(
-            np.random.choice([0, 1], (batch_size, self.label_dim), replace=True), dtype=tf.int32)
+            np.random.choice([0, 1], (batch_size, self.label_dim), replace=True), dtype=tf.float32)
         with tf.GradientTape() as tape:
             g_img = self.call(random_img_label, training=True)
             pred_fake, pred_class = self.d.call(g_img, training=False)
@@ -108,14 +114,14 @@ class ACGANgp(keras.Model):
         grads = tape.gradient(loss, self.g.trainable_variables)
         self.opt.apply_gradients(zip(grads, self.g.trainable_variables))
 
-        if self._train_step % 300 == 0 and self.summary_writer is not None:
+        if self._train_step % 100 == 0 and self.summary_writer is not None:
             with self.summary_writer.as_default():
                 tf.summary.scalar("g/w_distance", w_distance, step=self._train_step)
-                tf.summary.scalar("g/sigmoid", loss_class, step=self._train_step)
+                tf.summary.scalar("g/class", loss_class, step=self._train_step)
                 tf.summary.histogram("g/pred_fake", pred_fake, step=self._train_step)
                 tf.summary.histogram("g/first_grad", grads[0], step=self._train_step)
                 tf.summary.histogram("g/last_grad", grads[-1], step=self._train_step)
-                if self._train_step % 1000 == 0:
+                if self._train_step % 500 == 0:
                     tf.summary.image("g/img", (g_img + 1) / 2, max_outputs=5, step=self._train_step)
         self._train_step += 1
         return loss

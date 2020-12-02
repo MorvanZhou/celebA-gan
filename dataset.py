@@ -6,8 +6,6 @@ import tensorflow as tf
 # data is downloaded from http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html
 
 
-IMG_SHAPE = (128, 128, 3)
-
 def _bytes_feature(value):
     """Returns a bytes_list from a string / byte."""
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
@@ -25,43 +23,35 @@ def _img_array_feature(value):
 
 
 def _bytes_img_process(img_str):
-    crop = [45, 25, 128, 128]
+    crop = [20, 0, 178, 178]
     imgs = tf.io.decode_and_crop_jpeg(img_str, crop)
-    return imgs
-
-
-def _int_img_process(img_int):
-    imgs = tf.reshape(img_int, IMG_SHAPE)
+    imgs = tf.image.resize(imgs, (128, 128))
     return imgs
 
 
 class CelebA:
-    def __init__(self, batch_size, image_size=(128, 128, 3),
-                 label_path="data/list_attr_celeba.txt", img_dir="data/img_align_celeba", save_bytes=True):
-        self.label_path = label_path
-        self.img_dir = img_dir
+    def __init__(self, batch_size, data_dir="data"):
+        self.label_path = os.path.join(data_dir, "list_attr_celeba.txt")
+        self.img_dir = os.path.join(data_dir, "img_align_celeba")
+        self.tfrecord_dir = os.path.join(data_dir, "tfrecord-celebA-gan")
         self.batch_size = batch_size
         self.label_names = [
-            "Attractive",
             "Smiling",
             "Male",
         ]
-        with open(label_path) as f:
+        with open(self.label_path) as f:
             lines = f.readlines()
             self.label_names_id = []
             all_labels = lines[1].strip().split(" ")
             for label_name in self.label_names:
                 self.label_names_id.append(all_labels.index(label_name))
-        self.image_size = image_size
-        self.crop = [45, 45+image_size[0], 25, 25+image_size[1]]
         self.ds = None
-        self.save_bytes = save_bytes
-        self.img_process_func = _bytes_img_process if self.save_bytes else _int_img_process
+        self.img_process_func = _bytes_img_process
 
     def _image_example(self, img, labels):
         feature = {
             "labels": _int64_feature(labels),
-            "img": _bytes_feature(img) if self.save_bytes else _img_array_feature(img),
+            "img": _bytes_feature(img),
         }
         return tf.train.Example(features=tf.train.Features(feature=feature))
 
@@ -69,16 +59,13 @@ class CelebA:
         feature = tf.io.parse_single_example(example_proto, features={
             "labels": tf.io.FixedLenFeature([len(self.label_names)], tf.int64),
             "img": tf.io.FixedLenFeature([], tf.string)
-            if self.save_bytes
-            else tf.io.FixedLenFeature([self.image_size[0]*self.image_size[1]*self.image_size[2]], tf.int64),
         })
         labels = feature["labels"]
         imgs = self.img_process_func(feature["img"])
         return tf.cast(imgs, tf.float32) / 255 * 2 - 1, tf.cast(labels, tf.int32)
 
     def load_tf_recoder(self):
-        dir_ = os.path.join(os.path.dirname(self.img_dir), "tfrecord")
-        paths = [os.path.join(dir_, p) for p in os.listdir(dir_)]
+        paths = [os.path.join(self.tfrecord_dir, p) for p in os.listdir(self.tfrecord_dir)]
         raw_img_ds = tf.data.TFRecordDataset(paths, num_parallel_reads=min(4, len(paths)))
         self.ds = raw_img_ds.shuffle(2018).map(
             self._parse_img, num_parallel_calls=tf.data.experimental.AUTOTUNE,
@@ -95,19 +82,16 @@ class CelebA:
             n = 202599//4
             chunks = [lines[i:i + n] for i in range(0, len(lines), n)]
             for i, chunk in enumerate(chunks):
-                path = os.path.dirname(self.img_dir) + "/tfrecord/{}_{}.tfrecord".format("bytes" if self.save_bytes else "int", i)
+                print("process {}/{}...".format(i, len(chunks)))
+                path = "{}/{}.tfrecord".format(self.tfrecord_dir, i)
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with tf.io.TFRecordWriter(path) as writer:
                     for line in chunk:
                         img_name, img_labels = line.split(" ", 1)
-                        if self.save_bytes:
-                            try:
-                                img = open(os.path.join(self.img_dir, img_name), "rb").read()
-                            except Exception as e:
-                                break
-                        else:
-                            raise OSError
-
+                        try:
+                            img = open(os.path.join(self.img_dir, img_name), "rb").read()
+                        except Exception as e:
+                            break
                         label_str = img_labels.replace("  ", " ").split(" ")
                         labels = [0 if label_str[i] == "-1" else 1 for i in self.label_names_id]
                         assert len(labels) == len(self.label_names), ValueError(labels, img_labels)
@@ -115,8 +99,8 @@ class CelebA:
                         writer.write(tf_example.SerializeToString())
 
 
-def show_sample():
-    d = load_celebA_tfrecord(25)
+def show_sample(data_dir):
+    d = load_celebA_tfrecord(25, data_dir)
     images, labels = next(iter(d.ds))
     images = images.numpy()
     labels = labels.numpy()
@@ -132,13 +116,13 @@ def show_sample():
     plt.show()
 
 
-def parse_celebA_tfreord():
-    d = CelebA(1, IMG_SHAPE, LABEL_PATH, IMAGE_DIR)
+def parse_celebA_tfreord(data_dir):
+    d = CelebA(1, data_dir)
     d.to_tf_recoder()
 
 
-def load_celebA_tfrecord(batch_size):
-    d = CelebA(batch_size, IMG_SHAPE, LABEL_PATH, IMAGE_DIR)
+def load_celebA_tfrecord(batch_size, data_dir):
+    d = CelebA(batch_size, data_dir)
     d.load_tf_recoder()
     return d
 
@@ -147,17 +131,15 @@ if __name__ == "__main__":
     import time
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--label_path", dest="label_path", default="data/list_attr_celeba.txt", type=str)
-    parser.add_argument("--image_dir", dest="image_dir", default="data/img_align_celeba", type=str)
+    parser.add_argument("--data_dir", dest="data_dir", default="data", type=str)
 
     args = parser.parse_args()
 
-    LABEL_PATH = args.label_path
-    IMAGE_DIR = args.image_dir
+    DATA_DIR = args.data_dir
 
     t0 = time.time()
-    parse_celebA_tfreord()
-    # ds = load_celebA_tfrecord(20)
+    parse_celebA_tfreord(DATA_DIR)
+    # ds = load_celebA_tfrecord(20, DATA_DIR)
     # t1 = time.time()
     # print("load time", t1-t0)
     # count = 0
@@ -172,4 +154,4 @@ if __name__ == "__main__":
     #         break
     #
     # print("runtime", time.time()-t1)
-    show_sample()
+    show_sample(DATA_DIR)

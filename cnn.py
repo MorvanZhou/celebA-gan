@@ -39,20 +39,24 @@ except ImportError:
     InstanceNormalization = InstanceNormalization_
 
 
-def dc_d(norm="batch"):
+def batch_norm(momentum=0.9):
+    return BatchNormalization(momentum=momentum)
+
+
+def dc_d(norm=None):
     def add_block(filters):
         model.add(Conv2D(filters, 4, strides=2, padding='same', kernel_initializer=W_INIT))
         if norm == "batch":
-            model.add(BatchNormalization())
+            model.add(batch_norm())
         model.add(LeakyReLU(alpha=0.2))
-        model.add(Dropout(0.2))
+        # model.add(Dropout(0.2))
 
     model = keras.Sequential()
     # [n, 128, 128, 3]
     # if use_bn:
-    #     model.add(BatchNormalization())
-    model.add(GaussianNoise(0.02))
-    add_block(16)
+    #     model.add(batch_norm())
+    # model.add(GaussianNoise(0.02))
+    add_block(32)
     # 64
     add_block(32)
     # 32
@@ -66,76 +70,70 @@ def dc_d(norm="batch"):
     return model
 
 
-def dc_g(input_shape):
+def dc_g(input_shape, norm="batch"):
+    if norm == "instance":
+        _norm = InstanceNormalization
+    else:
+        _norm = batch_norm
     block = lambda filters: [
-        UpSampling2D((2, 2)),
+        UpSampling2D((2, 2), interpolation="bilinear"),
         Conv2D(filters, 4, 1, "same", kernel_initializer=W_INIT),
-        BatchNormalization(), ReLU()
+        _norm(), ReLU(),
     ]
     return keras.Sequential([
         # [n, latent]
         Dense(4 * 4 * 128, input_shape=input_shape, kernel_initializer=W_INIT),
-        BatchNormalization(), ReLU(),
+        _norm(), ReLU(),
         Reshape((4, 4, 128)),
         # 4
-        *block(64),
+        *block(128),
         # 8
-        *block(64),
+        *block(126),
         # 16
         *block(64),
         # 32
-        *block(32),
+        *block(64),
         # 64
-        *block(16),
+        *block(32),
         # 128
         Conv2D(3, 7, 1, padding="same", kernel_initializer=W_INIT),
-        BatchNormalization(),
+        _norm(),
         Activation(keras.activations.tanh),
     ])
 
 
 class ResBlock(keras.layers.Layer):
-    def __init__(self, filters, activation=None, bottlenecks=2, norm=None, inner_relu=True):
+    def __init__(self, filters, bottlenecks=2, norm=None):
         super().__init__()
-        self.activation = activation
-        self.bn = keras.Sequential(
-            [ResBottleneck(filters, norm, inner_relu=inner_relu)]
+        self.bs = keras.Sequential(
+            [ResBottleneck(filters, norm) for _ in range(bottlenecks)]
         )
-        if bottlenecks > 1:
-            self.bn.add(ReLU())
-            for _ in range(1, bottlenecks):
-                self.bn.add(ResBottleneck(filters, norm, inner_relu=inner_relu))
 
     def call(self, x, training=None):
-        o = self.bn(x, training=training)
-        if self.activation is not None:
-            o = self.activation(o)
+        o = self.bs(x, training=training)
         return o
 
 
 class ResBottleneck(keras.layers.Layer):
-    def __init__(self, filters, norm=None, inner_relu=True):
+    def __init__(self, filters, norm=None):
         super().__init__()
-        c = filters // 4
-        self.b = keras.Sequential([Conv2D(c, 1, strides=1, padding="same", kernel_initializer=W_INIT)])
-        if norm == "batch":
-            self.b.add(BatchNormalization())
-        elif norm == "instance":
-            self.b.add(InstanceNormalization())
-        self.b.add(ReLU() if inner_relu else LeakyReLU())
-        self.b.add(Conv2D(filters, 4, strides=1, padding="same", kernel_initializer=W_INIT))
-        if norm == "batch":
-            self.norm = BatchNormalization()
-        elif norm == "instance":
-            self.norm = InstanceNormalization()
-        else:
-            self.norm = None
+        self.norm = norm
+        c = filters // 3
+        self.b = keras.Sequential([Conv2D(c, 1, 1, "same", kernel_initializer=W_INIT)])
+        self._add_norm(self.b)
+        self.b.add(LeakyReLU(0.2))
+        self.b.add(Conv2D(filters, 4, 1, "same", kernel_initializer=W_INIT))
+        self._add_norm(self.b)
+
+    def _add_norm(self, b):
+        if self.norm == "batch":
+            b.add(batch_norm())
+        elif self.norm == "instance":
+            b.add(InstanceNormalization())
 
     def call(self, x, training=None):
         b = self.b(x, training=training)
-        x = b + x
-        if self.norm is not None:
-            x = self.norm(x)
+        x = tf.nn.leaky_relu(b + x, alpha=0.2)
         return x
 
 
@@ -145,9 +143,12 @@ def resnet_g(input_shape, img_shape=(128, 128, 3), norm="instance"):
     m = keras.Sequential([
         keras.Input(input_shape),
         Dense(_h * _w * 128, input_shape=input_shape, kernel_initializer=W_INIT),
-        BatchNormalization(),
         Reshape((_h, _w, 128)),
     ], name="resnet_g")
+    if norm == "instance":
+        m.add(InstanceNormalization())
+    elif norm == "batch":
+        m.add(batch_norm())
     c = _c = 128
     while True:
         strides = [1, 1]
@@ -157,29 +158,37 @@ def resnet_g(input_shape, img_shape=(128, 128, 3), norm="instance"):
         if _w < w:
             _w *= 2
             strides[1] = 2
-        m.add(UpSampling2D(strides))
+        m.add(UpSampling2D(strides, interpolation="bilinear"))
         if c != _c:
             c = _c
             m.add(Conv2D(_c, 1, 1, "same"))
-            if norm == "instance":
-                m.add(InstanceNormalization())
         m.add(ResBlock(filters=c, bottlenecks=1, norm=norm))
         if _w >= w and _h >= h:
             break
-        _c = max(int(c / 2), 128)
+        c = max(int(c / 2), 64)
 
-    m.add(ResBlock(128, bottlenecks=1, norm=norm, inner_relu=True))
-    m.add(ResBlock(128, bottlenecks=1, norm=norm, inner_relu=True))
-    m.add(Conv2D(3, 5, 1, "same"))
-    m.add(Activation(keras.activations.tanh))
+    # m.add(Conv2D(64, 5, 1, "same"))
+    # if norm == "instance":
+    #     m.add(InstanceNormalization())
+    # elif norm == "batch":
+    #     m.add(batch_norm())
+    # m.add(LeakyReLU(0.2))
+    m.add(Conv2D(3, 7, 1, "same", activation="tanh"))
     return m
 
 
-def resnet_d(input_shape=(128,128,3), norm="instance"):
+def resnet_d(input_shape=(128, 128, 3), norm=None):
+    if norm == "batch":
+        norm = None
     _h, _w = input_shape[0], input_shape[1]
-    h, w = 4, 4
-    m = keras.Sequential(name="resnet_d")
-    c = 32
+    h, w = 8, 8
+    m = keras.Sequential([
+        # Conv2D(64, 7, 1, "same", kernel_initializer=W_INIT),
+    ], name="resnet_d")
+    if norm == "instance":
+        m.add(InstanceNormalization())
+        m.add(LeakyReLU(0.2))
+    c = 16
     while True:
         strides = [1, 1]
         if _h > h:
@@ -188,14 +197,14 @@ def resnet_d(input_shape=(128,128,3), norm="instance"):
         if _w > w:
             _w //= 2
             strides[1] = 2
-        m.add(Conv2D(c, 4, strides, "same", kernel_initializer=W_INIT))
-        if norm == "batch":
-            m.add(BatchNormalization())
-        elif norm == "instance":
-            m.add(InstanceNormalization())
-        m.add(ResBlock(filters=c, bottlenecks=1, norm=norm, inner_relu=False))
+        m.add(Conv2D(c, 3, strides, "same", kernel_initializer=W_INIT))
+        m.add(ResBlock(filters=c, bottlenecks=2, norm=norm))
         c = min(int(2 * c), 128)
         if _w <= w and _h <= h:
             break
-    m.add(Flatten())
+    # m.add(Conv2D(256, 3, 2, "same"))    # 4^4
+    # if norm == "instance":
+    #     m.add(InstanceNormalization())
+    # m.add(LeakyReLU(0.2))
+    # m.add(Flatten())
     return m
