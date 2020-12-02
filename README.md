@@ -3,6 +3,13 @@ the people in CelebA dataset.
 
 After 1 day training, some of OK results:
 
+| female, no smile |  male, no smile |  female, smile | male, smile|
+|----------|:-------------:|------:|---:|
+| random seed 1 |  random seed 1 | random seed 1 | random seed 1|
+| random seed 2 |  random seed 2 | random seed 2 | random seed 2|
+| random seed 3 |  random seed 3 | random seed 3 | random seed 3|
+
+
 ![](demo/ep009t010500.png)
 ![](demo/ep009t005500.png)
 
@@ -12,6 +19,11 @@ Some of weird results:
 ![](demo/ep008t015500.png)
 
 ## Run code
+install requirements:
+```shell script
+pip3 install -r requirements.txt
+```
+
 parse data
 ```shell script
 python dataset.py --data_dir "D:/data/celebA_img_align"
