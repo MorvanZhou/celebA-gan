@@ -10,13 +10,13 @@ After 1 day training, some of OK results:
 | random seed 3 |  random seed 3 | random seed 3 | random seed 3|
 
 
-![](demo/ep009t010500.png)
-![](demo/ep009t005500.png)
+![](/demo/ep009t010500.png)
+![](/demo/ep009t005500.png)
 
 Some of weird results:
 
-![](demo/ep009t006500.png)
-![](demo/ep008t015500.png)
+![](/demo/ep009t006500.png)
+![](/demo/ep008t015500.png)
 
 ## Run code
 install requirements:
