@@ -17,7 +17,7 @@ def set_soft_gpu(soft_gpu):
             print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
 
 
-def save_gan(model, ep):
+def save_gan(model, img_name):
     # "Smiling", "Male",
     r = np.array([
         [0, 0],
@@ -45,7 +45,7 @@ def save_gan(model, ep):
             plt.axis("off")
 
     plt.tight_layout()
-    path = "visual/{}.png".format(ep)
+    path = "visual/{}.png".format(img_name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     plt.savefig(path)
 
